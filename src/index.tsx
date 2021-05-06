@@ -16,13 +16,21 @@ type Transition<TName> =
 type States<T extends Record<keyof T, { on?: any }>> = {
   [K in keyof T]: {
     on?: Record<keyof NonNullable<T[K]['on']>, Transition<keyof T>>;
-    effect?(send: (action: keyof NonNullable<T[K]['on']>) => void): void;
+    effect?(
+      send: (action: keyof NonNullable<T[K]['on']>) => void,
+      context: any
+    ): ((send: (action: keyof NonNullable<T[K]['on']>) => void, context: any) => void) | void;
   };
 };
 
 function stateNode<TEvents extends Record<keyof TEvents, PropertyKey | Record<'target', PropertyKey>>>(param: {
   on: TEvents;
-  effect?: ((send: (action: keyof TEvents) => void) => void) | undefined;
+  effect?:
+    | ((
+        send: (action: keyof TEvents) => void,
+        context: any
+      ) => ((send: (action: keyof TEvents) => void, context: any) => void) | void)
+    | undefined;
 }): typeof param;
 function stateNode(param: { effect?: () => void; on?: undefined }): typeof param;
 function stateNode<TEvents extends Record<keyof TEvents, PropertyKey | Record<'target', PropertyKey>>>({
@@ -30,7 +38,10 @@ function stateNode<TEvents extends Record<keyof TEvents, PropertyKey | Record<'t
   effect,
 }: {
   on?: TEvents;
-  effect?: (send: (action: keyof TEvents) => void) => void;
+  effect?: (
+    send: (action: keyof TEvents) => void,
+    context: any
+  ) => ((send: (action: keyof TEvents) => void, context: any) => void) | void;
 }) {
   return { ...(on && { on }), ...(effect && { effect }) };
 }
@@ -92,12 +103,17 @@ export default function useStateMachine<Context extends Record<PropertyKey, any>
 
     const [machine, send] = useReducer(reducer, initialState);
 
-    // // The updater function sends an internal event to the reducer to trigger the actual update
-    // const update = (updater: (context: Context) => Context) =>
-    //   send({
-    //     type: __contextKey,
-    //     updater,
-    //   });
+    // The updater function sends an internal event to the reducer to trigger the actual update
+    const update = (updater: (context: Context) => Context) =>
+      send({
+        type: __contextKey,
+        updater,
+      });
+
+    useEffect(() => {
+      const exit = config.states[machine.value]?.effect?.(send as Dispatch<PropertyKey>, update);
+      return typeof exit === 'function' ? exit.bind(null, send as Dispatch<PropertyKey>, update) : void 0;
+    }, [machine.value]);
 
     return [machine, send] as [any, Dispatch<KeysOfTransition<NonNullable<T[keyof T]['on']>>>];
   };
